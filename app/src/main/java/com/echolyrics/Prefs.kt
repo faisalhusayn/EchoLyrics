@@ -16,9 +16,15 @@ class Prefs(context: Context) {
     var offset: Long
         get() = p.getLong("offset", 0)
         set(value) { p.edit().putLong("offset", value).apply() }
+    private val legacyFont: Float get() = p.getFloat("font", 40f)
+    /** Size of the currently sung (highlighted) line. Defaults to the old single font setting. */
+    var activeFontSize: Float
+        get() = p.getFloat("active_font", legacyFont)
+        set(value) { p.edit().putFloat("active_font", value).apply() }
+    /** Size of the non-active lyric lines. */
     var fontSize: Float
-        get() = p.getFloat("font", 40f)
-        set(value) { p.edit().putFloat("font", value).apply() }
+        get() = p.getFloat("normal_font", (activeFontSize * .68f).coerceAtLeast(20f))
+        set(value) { p.edit().putFloat("normal_font", value).apply() }
     var globalOffset: Long
         get() = p.getLong("global_offset", 0)
         set(value) { p.edit().putLong("global_offset", value).apply() }

@@ -151,7 +151,7 @@ class MainActivity : Activity() {
         val labels = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(12), 0, 0, 0) }
         title = text(22, Color.WHITE).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END }; artist = text(15, 0xffb8b8b8.toInt()).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END }; labels.addView(title); labels.addView(artist)
         top.addView(labels, LinearLayout.LayoutParams(0, -1, 1f)); body.addView(top, LinearLayout.LayoutParams(-1, dp(74)))
-        syncedLines = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, dp(90), 0, dp(90)) }
+        syncedLines = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL; setPadding(0, dp(90), 0, dp(90)) }
         syncedScroll = ScrollView(this).apply { isFillViewport = true; addView(syncedLines) }
         syncedBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; addView(syncedScroll, LinearLayout.LayoutParams(-1, -1)) }
         plainText = text(28, Color.WHITE).apply { gravity = Gravity.CENTER; setPadding(dp(10), 0, dp(10), 0) }
@@ -224,13 +224,14 @@ class MainActivity : Activity() {
     private fun fetchLyrics(item: Track, force: Boolean, attempt: Int = 0) { DebugLog.add("lyrics fetch ${item.id.takeLast(6)}"); executor.execute { val lookup = runCatching { lyrics.get(item, force) }; val result = lookup.getOrNull(); val retry = result == null && attempt == 0 && (lookup.isFailure || lyrics.lastNetworkError); if (lookup.isFailure) DebugLog.add("lyrics lookup failed"); DebugLog.add("lyrics result ${item.id.takeLast(6)} synced=${result?.synced?.size ?: 0} plain=${!result?.plain.isNullOrBlank()}"); handler.post { if (track?.id != item.id) { DebugLog.add("discarded stale lyrics"); return@post }; if (retry) { setState(State.LOADING); handler.postDelayed({ if (track?.id == item.id) fetchLyrics(item, true, 1) }, 1500); return@post }; lyric = result; if (!prefs.showLyrics) return@post; if (result == null) { renderSynced(emptyList()); plainText.text = "No lyrics available"; syncedBox.visibility = View.GONE; plainScroll.visibility = View.VISIBLE; setState(if (lyrics.lastNetworkError) State.OFFLINE else State.NO_LYRICS) } else { setState(State.OK); if (result.synced.isEmpty()) { renderSynced(emptyList()); plainText.text = result.plain ?: "No lyrics available"; syncedBox.visibility = View.GONE; plainScroll.visibility = View.VISIBLE } else { renderSynced(result.synced); showSynced() } } } } }
     private fun renderSynced(lines: List<LyricLine>) {
         syncedLines.removeAllViews()
-        syncedViews = lines.map { line -> text(prefs.fontSize.coerceAtMost(40f).toInt(), 0xff777777.toInt()).apply { this.text = line.text; gravity = Gravity.CENTER; setPadding(dp(12), dp(10), dp(12), dp(10)); maxLines = 3; setOnClickListener { if (!overlayOpen) seekToLine(line.time) } } }
-        syncedViews.forEach { syncedLines.addView(it, LinearLayout.LayoutParams(-1, -2)) }
+        syncedViews = lines.map { line -> text(prefs.fontSize.coerceAtMost(48f).toInt(), 0xff777777.toInt()).apply { this.text = line.text; gravity = Gravity.CENTER; setPadding(dp(12), dp(10), dp(12), dp(10)); maxLines = 3; setOnClickListener { if (!overlayOpen) seekToLine(line.time) } } }
+        syncedViews.forEach { syncedLines.addView(it, LinearLayout.LayoutParams(-2, -2)) }
         lastLineIndex = -1
     }
     private fun seekToLine(time: Long) {
         val item = track ?: return
         val position = time.coerceIn(0L, item.duration.toLong())
+        DebugLog.add("seek tap ${position / 1000}s")
         executor.execute {
             val result = spotify.seek(position, item.deviceId)
             if (result.code in 200..299 || result.code == 204) {
@@ -245,7 +246,7 @@ class MainActivity : Activity() {
     private fun showSynced() { syncedBox.visibility = View.VISIBLE; plainScroll.visibility = View.GONE }
     private fun drawLyrics() {
         val item = track ?: return; if (!prefs.showLyrics) return; val value = progress + if (playing) System.currentTimeMillis() - polledAt else 0; val offset = prefs.offsetFor(item.id) + prefs.globalOffset; val lines = lyric?.synced.orEmpty()
-        if (lines.isNotEmpty() && syncedViews.size == lines.size) { val index = lines.indexOfLast { it.time <= value + offset }.coerceAtLeast(0); if (index != lastLineIndex) { lastLineIndex = index; syncedViews.forEachIndexed { n, view -> view.setTextColor(if (n == index) Color.WHITE else 0xff777777.toInt()); view.textSize = if (n == index) prefs.fontSize else (prefs.fontSize * .68f).coerceAtLeast(20f) }; syncedScroll.post { val view = syncedViews[index]; syncedScroll.scrollTo(0, (view.top - syncedScroll.height / 2 + view.height / 2).coerceAtLeast(0)) } } }
+        if (lines.isNotEmpty() && syncedViews.size == lines.size) { val index = lines.indexOfLast { it.time <= value + offset }.coerceAtLeast(0); if (index != lastLineIndex) { if (lastLineIndex == -1) DebugLog.add("font active=${prefs.activeFontSize.toInt()} other=${prefs.fontSize.toInt()}"); lastLineIndex = index; syncedViews.forEachIndexed { n, view -> view.setTextColor(if (n == index) Color.WHITE else 0xff777777.toInt()); view.textSize = if (n == index) prefs.activeFontSize else prefs.fontSize }; syncedScroll.post { val view = syncedViews[index]; syncedScroll.scrollTo(0, (view.top - syncedScroll.height / 2 + view.height / 2).coerceAtLeast(0)) } } }
         lyric?.plain?.takeIf { lines.isEmpty() }?.let { if (System.currentTimeMillis() > plainManualUntil && !plainAuto) plainAuto = true; if (plainAuto && System.currentTimeMillis() > plainManualUntil) { val ratio = (value.toFloat() / item.duration.coerceAtLeast(1)).coerceIn(0f, 1f); plainScroll.post { val max = (plainText.height - plainScroll.height).coerceAtLeast(0); plainScroll.scrollTo(0, (max * ratio).toInt()) } } }
         if (::elapsedTime.isInitialized) { elapsedTime.text = formatTime(value); totalTime.text = formatTime(item.duration.toLong()) }
         if (!seeking && ::seekBar.isInitialized && item.duration > 0) seekBar.progress = (value.coerceIn(0, item.duration.toLong()) * 1000 / item.duration).toInt()

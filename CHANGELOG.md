@@ -4,6 +4,8 @@
 
 - EchoLyrics reclaims the foreground for a 15-second window after playback starts or the track changes, so Amazon's Now Playing screen no longer stays in front. It stands down whenever a Settings, Debug, or main screen is already visible, and makes no extra Spotify requests.
 - Added horizontal swipe gestures: swipe left for next track, swipe right for previous track.
+- Lyric tap-to-seek now only responds to taps on the words themselves; the empty space to either side of a line is no longer tappable.
+- Split the font size setting into two: Lyrics size for the other lines and Active size for the highlighted line.
 - Swipes are ignored when they start on the seek bar, so dragging to seek no longer changes tracks.
 - Switched the bundled font to Figtree SemiBold (600).
 - Added an optional accent-colour background with a subtle vertical gradient and contrast-safe highlight colour.

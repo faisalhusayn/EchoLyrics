@@ -24,7 +24,7 @@ class SettingsActivity : Activity() {
         root.addView(header)
         root.addView(label("DISPLAY", 12, 0xff999999.toInt()), LinearLayout.LayoutParams(-1, dp(32)))
         root.addView(row(action(if (prefs.showLyrics) "Lyrics visible" else "Lyrics hidden") { prefs.showLyrics = !prefs.showLyrics; recreate() }, action(if (prefs.showArt) "Album art visible" else "Album art hidden") { prefs.showArt = !prefs.showArt; recreate() }))
-        root.addView(row(action("Font ${prefs.fontSize.toInt()}sp") { prefs.fontSize = when (prefs.fontSize.toInt()) { 28 -> 34f; 34 -> 40f; 40 -> 48f; else -> 28f }; recreate() }, action(if (prefs.nightMode) "Night mode on" else "Night mode off") { prefs.nightMode = !prefs.nightMode; recreate() }))
+        root.addView(row(action("Lyrics ${prefs.fontSize.toInt()}sp") { prefs.fontSize = nextFont(prefs.fontSize, lyricSteps); recreate() }, action("Active ${prefs.activeFontSize.toInt()}sp") { prefs.activeFontSize = nextFont(prefs.activeFontSize, activeSteps); recreate() }, action(if (prefs.nightMode) "Night mode on" else "Night mode off") { prefs.nightMode = !prefs.nightMode; recreate() }))
         root.addView(row(action(if (prefs.accentEnabled) "Accent background on" else "Accent background off") { prefs.accentEnabled = !prefs.accentEnabled; recreate() }, action(if (prefs.lowBrightness) "Low brightness on" else "Low brightness off") { prefs.lowBrightness = !prefs.lowBrightness; recreate() }))
         root.addView(label("SYNC", 12, 0xff999999.toInt()), LinearLayout.LayoutParams(-1, dp(32)))
         root.addView(row(action("Track -100ms") { adjust(-100) }, action("Track +100ms") { adjust(100) }, action("Global -100ms") { prefs.globalOffset -= 100 }, action("Global +100ms") { prefs.globalOffset += 100 }))
@@ -35,6 +35,9 @@ class SettingsActivity : Activity() {
         setContentView(ScrollView(this).apply { isFillViewport = true; addView(root) })
     }
     private fun adjust(delta: Long) { prefs.globalOffset += delta }
+    private val lyricSteps = listOf(20f, 24f, 28f, 34f, 40f, 48f)
+    private val activeSteps = listOf(28f, 34f, 40f, 48f)
+    private fun nextFont(current: Float, steps: List<Float>) = steps.firstOrNull { it > current + .5f } ?: steps.first()
     private fun row(vararg views: View) = LinearLayout(this).apply { gravity = Gravity.CENTER; views.forEach { addView(it, LinearLayout.LayoutParams(0, dp(58), 1f).apply { setMargins(dp(4), dp(3), dp(4), dp(3)) }) } }
     private fun label(value: String, size: Int, color: Int) = TextView(this).apply { text = value; textSize = size.toFloat(); setTextColor(color); typeface = dmSans; gravity = Gravity.CENTER_VERTICAL }
     private fun action(value: String, icon: Int = 0, run: () -> Unit) = TextView(this).apply { text = value; textSize = 13f; typeface = dmSans; gravity = Gravity.CENTER; setTextColor(Color.WHITE); minHeight = dp(56); setPadding(dp(10), 0, dp(10), 0); if (icon != 0) { setCompoundDrawablesWithIntrinsicBounds(icon, 0, 0, 0); compoundDrawablePadding = dp(8) }; background = GradientDrawable().apply { setColor(0xff242424.toInt()); cornerRadius = dp(18).toFloat(); setStroke(dp(1), 0xff3c3c3c.toInt()) }; elevation = dp(2).toFloat(); setOnClickListener { run() } }
