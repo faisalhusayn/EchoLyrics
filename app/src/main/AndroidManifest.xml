@@ -1,0 +1,19 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.INTERNET" />
+    <application android:theme="@style/AppTheme" android:label="EchoLyrics" android:usesCleartextTraffic="false" android:resizeableActivity="false">
+        <service android:name=".PlaybackMonitorService" android:exported="false" android:stopWithTask="false" />
+        <activity android:name=".SettingsActivity" android:screenOrientation="landscape" android:exported="false" />
+        <activity android:name=".DebugActivity" android:screenOrientation="landscape" android:exported="false" />
+        <activity android:name=".MainActivity" android:screenOrientation="landscape" android:configChanges="orientation|screenSize" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="echolyrics" android:host="callback" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

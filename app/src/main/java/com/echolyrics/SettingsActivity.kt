@@ -1,0 +1,40 @@
+package com.echolyrics
+
+import android.app.Activity
+import android.content.Intent
+import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
+import android.os.Bundle
+import android.view.Gravity
+import android.view.View
+import android.widget.*
+
+class SettingsActivity : Activity() {
+    private lateinit var prefs: Prefs
+    private lateinit var dmSans: android.graphics.Typeface
+    override fun onCreate(state: Bundle?) {
+        super.onCreate(state)
+        prefs = Prefs(this)
+        dmSans = android.graphics.Typeface.createFromAsset(assets, "Figtree-SemiBold.ttf")
+        val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(28), dp(18), dp(28), dp(18)); setBackgroundColor(Color.BLACK) }
+        val header = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+        header.addView(label("Settings", 25, Color.WHITE), LinearLayout.LayoutParams(0, dp(58), 1f)); header.addView(action("Done") { finish() })
+        root.addView(header)
+        root.addView(label("DISPLAY", 12, 0xff999999.toInt()), LinearLayout.LayoutParams(-1, dp(32)))
+        root.addView(row(action(if (prefs.showLyrics) "Lyrics visible" else "Lyrics hidden") { prefs.showLyrics = !prefs.showLyrics; recreate() }, action(if (prefs.showArt) "Album art visible" else "Album art hidden") { prefs.showArt = !prefs.showArt; recreate() }))
+        root.addView(row(action("Font ${prefs.fontSize.toInt()}sp") { prefs.fontSize = when (prefs.fontSize.toInt()) { 28 -> 34f; 34 -> 40f; 40 -> 48f; else -> 28f }; recreate() }, action(if (prefs.nightMode) "Night mode on" else "Night mode off") { prefs.nightMode = !prefs.nightMode; recreate() }))
+        root.addView(row(action(if (prefs.accentEnabled) "Accent background on" else "Accent background off") { prefs.accentEnabled = !prefs.accentEnabled; recreate() }, action(if (prefs.lowBrightness) "Low brightness on" else "Low brightness off") { prefs.lowBrightness = !prefs.lowBrightness; recreate() }))
+        root.addView(label("SYNC", 12, 0xff999999.toInt()), LinearLayout.LayoutParams(-1, dp(32)))
+        root.addView(row(action("Track -100ms") { adjust(-100) }, action("Track +100ms") { adjust(100) }, action("Global -100ms") { prefs.globalOffset -= 100 }, action("Global +100ms") { prefs.globalOffset += 100 }))
+        root.addView(label("BEHAVIOR", 12, 0xff999999.toInt()), LinearLayout.LayoutParams(-1, dp(32)))
+        root.addView(row(action(if (prefs.autoLaunch) "Auto-launch on" else "Auto-launch off") { prefs.autoLaunch = !prefs.autoLaunch; if (prefs.autoLaunch) startService(Intent(this, PlaybackMonitorService::class.java)) else stopService(Intent(this, PlaybackMonitorService::class.java)); recreate() }, action("Debug log") { startActivity(Intent(this, DebugActivity::class.java)) }))
+        root.addView(label("ACCOUNT", 12, 0xff999999.toInt()), LinearLayout.LayoutParams(-1, dp(32)))
+        root.addView(row(action("Log out") { prefs.clearAuth(); finish() }, action("Clear cached lyrics") { cacheDir.resolve("lyrics").deleteRecursively(); Toast.makeText(this, "Lyrics cache cleared", Toast.LENGTH_SHORT).show() }))
+        setContentView(ScrollView(this).apply { isFillViewport = true; addView(root) })
+    }
+    private fun adjust(delta: Long) { prefs.globalOffset += delta }
+    private fun row(vararg views: View) = LinearLayout(this).apply { gravity = Gravity.CENTER; views.forEach { addView(it, LinearLayout.LayoutParams(0, dp(58), 1f).apply { setMargins(dp(4), dp(3), dp(4), dp(3)) }) } }
+    private fun label(value: String, size: Int, color: Int) = TextView(this).apply { text = value; textSize = size.toFloat(); setTextColor(color); typeface = dmSans; gravity = Gravity.CENTER_VERTICAL }
+    private fun action(value: String, icon: Int = 0, run: () -> Unit) = TextView(this).apply { text = value; textSize = 13f; typeface = dmSans; gravity = Gravity.CENTER; setTextColor(Color.WHITE); minHeight = dp(56); setPadding(dp(10), 0, dp(10), 0); if (icon != 0) { setCompoundDrawablesWithIntrinsicBounds(icon, 0, 0, 0); compoundDrawablePadding = dp(8) }; background = GradientDrawable().apply { setColor(0xff242424.toInt()); cornerRadius = dp(18).toFloat(); setStroke(dp(1), 0xff3c3c3c.toInt()) }; elevation = dp(2).toFloat(); setOnClickListener { run() } }
+    private fun dp(value: Int) = (value * resources.displayMetrics.density + .5f).toInt()
+}
