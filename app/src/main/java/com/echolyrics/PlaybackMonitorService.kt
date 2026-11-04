@@ -11,15 +11,19 @@ class PlaybackMonitorService : Service() {
     private val handler = Handler(Looper.getMainLooper())
     private var initialized = false
     private var wasPlaying = false
+    private var lastTrackId: String? = null
     private val poll: Runnable = object : Runnable {
         override fun run() {
             Thread {
-                val result = runCatching { client.current().value }.getOrNull()
-                val isPlaying = result?.playing == true
-                if (initialized && isPlaying && !wasPlaying) {
-                    startActivity(Intent(applicationContext, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP))
-                }
-                initialized = true; wasPlaying = isPlaying
+                val track = runCatching { client.current().value }.getOrNull()
+                val isPlaying = track?.playing == true
+                val trackId = track?.id
+                val started = initialized && isPlaying && !wasPlaying
+                val changed = initialized && isPlaying && trackId != null && lastTrackId != null && trackId != lastTrackId
+                if (started || changed) Refront.claim(this@PlaybackMonitorService)
+                initialized = true
+                wasPlaying = isPlaying
+                if (trackId != null) lastTrackId = trackId
                 handler.postDelayed(poll, 5000)
             }.start()
         }

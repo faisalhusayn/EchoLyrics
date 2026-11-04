@@ -73,6 +73,8 @@ class MainActivity : Activity() {
     private var touchDownAt = 0L
     private var touchBlocked = false
     private var lastSwipeAt = 0L
+    private var rebuildOnResume = false
+    private val overlayOpen get() = ::overlay.isInitialized && overlay.visibility == View.VISIBLE
 
     private enum class State(val label: String, val color: Int) {
         LOGGED_OUT("logged out", 0xffcc7777.toInt()), OFFLINE("offline", 0xffccaa66.toInt()),
@@ -97,8 +99,13 @@ class MainActivity : Activity() {
         intent.getStringExtra("refresh_token")?.let { prefs.refreshToken = it }
         handler.post(poller); handler.post(ticker)
     }
-    override fun onResume() { super.onResume(); DebugLog.add("activity resume"); if (::root.isInitialized) { track = null; lyric = null; buildUi() }; handler.removeCallbacks(poller); handler.post(poller) }
+    override fun onResume() {
+        super.onResume(); AppState.resumed++; DebugLog.add("activity resume")
+        if (rebuildOnResume && ::root.isInitialized) { rebuildOnResume = false; track = null; lyric = null; buildUi() }
+        handler.removeCallbacks(poller); handler.post(poller)
+    }
     override fun onPause() { super.onPause(); DebugLog.add("activity pause"); handler.removeCallbacks(poller) }
+    override fun onStop() { if (AppState.resumed > 0) AppState.resumed--; super.onStop() }
     override fun onDestroy() { executor.shutdownNow(); pollExecutor.shutdownNow(); handler.removeCallbacksAndMessages(null); lastBitmap?.recycle(); super.onDestroy() }
 
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
@@ -179,7 +186,7 @@ class MainActivity : Activity() {
         val timing = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; elapsedTime = text(12, 0xffaaaaaa.toInt()); totalTime = text(12, 0xffaaaaaa.toInt()); addView(elapsedTime); addView(Space(this@MainActivity), LinearLayout.LayoutParams(0, 1, 1f)); addView(totalTime) }
         overlay.addView(playback, LinearLayout.LayoutParams(-1, dp(76))); overlay.addView(timing, LinearLayout.LayoutParams(-1, dp(22))); overlay.addView(seekBar, LinearLayout.LayoutParams(-1, dp(38)))
         val actions = LinearLayout(this).apply { gravity = Gravity.CENTER }
-        actions.addView(Space(this), LinearLayout.LayoutParams(0, 1, 1f)); actions.addView(iconButton(R.drawable.ic_settings, 56, "Settings") { startActivity(Intent(this, SettingsActivity::class.java)) }, LinearLayout.LayoutParams(dp(56), dp(56)).apply { setMargins(dp(8), 0, dp(8), 0) }); actions.addView(iconButton(R.drawable.ic_refresh, 56, "Refresh lyrics") { track?.let { lyric = null; renderSynced(emptyList()); showSynced(); setState(State.LOADING); fetchLyrics(it, true) } }, LinearLayout.LayoutParams(dp(56), dp(56)).apply { setMargins(dp(8), 0, dp(8), 0) }); actions.addView(saveButton, LinearLayout.LayoutParams(dp(56), dp(56)).apply { setMargins(dp(8), 0, dp(8), 0) })
+        actions.addView(Space(this), LinearLayout.LayoutParams(0, 1, 1f)); actions.addView(iconButton(R.drawable.ic_settings, 56, "Settings") { rebuildOnResume = true; startActivity(Intent(this, SettingsActivity::class.java)) }, LinearLayout.LayoutParams(dp(56), dp(56)).apply { setMargins(dp(8), 0, dp(8), 0) }); actions.addView(iconButton(R.drawable.ic_refresh, 56, "Refresh lyrics") { track?.let { lyric = null; renderSynced(emptyList()); showSynced(); setState(State.LOADING); fetchLyrics(it, true) } }, LinearLayout.LayoutParams(dp(56), dp(56)).apply { setMargins(dp(8), 0, dp(8), 0) }); actions.addView(saveButton, LinearLayout.LayoutParams(dp(56), dp(56)).apply { setMargins(dp(8), 0, dp(8), 0) })
         overlay.addView(actions)
         root.addView(overlay, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM).apply { setMargins(dp(12), 0, dp(12), dp(12)) })
         updateControlIcons()
@@ -217,7 +224,7 @@ class MainActivity : Activity() {
     private fun fetchLyrics(item: Track, force: Boolean, attempt: Int = 0) { DebugLog.add("lyrics fetch ${item.id.takeLast(6)}"); executor.execute { val lookup = runCatching { lyrics.get(item, force) }; val result = lookup.getOrNull(); val retry = result == null && attempt == 0 && (lookup.isFailure || lyrics.lastNetworkError); if (lookup.isFailure) DebugLog.add("lyrics lookup failed"); DebugLog.add("lyrics result ${item.id.takeLast(6)} synced=${result?.synced?.size ?: 0} plain=${!result?.plain.isNullOrBlank()}"); handler.post { if (track?.id != item.id) { DebugLog.add("discarded stale lyrics"); return@post }; if (retry) { setState(State.LOADING); handler.postDelayed({ if (track?.id == item.id) fetchLyrics(item, true, 1) }, 1500); return@post }; lyric = result; if (!prefs.showLyrics) return@post; if (result == null) { renderSynced(emptyList()); plainText.text = "No lyrics available"; syncedBox.visibility = View.GONE; plainScroll.visibility = View.VISIBLE; setState(if (lyrics.lastNetworkError) State.OFFLINE else State.NO_LYRICS) } else { setState(State.OK); if (result.synced.isEmpty()) { renderSynced(emptyList()); plainText.text = result.plain ?: "No lyrics available"; syncedBox.visibility = View.GONE; plainScroll.visibility = View.VISIBLE } else { renderSynced(result.synced); showSynced() } } } } }
     private fun renderSynced(lines: List<LyricLine>) {
         syncedLines.removeAllViews()
-        syncedViews = lines.map { line -> text(prefs.fontSize.coerceAtMost(40f).toInt(), 0xff777777.toInt()).apply { this.text = line.text; gravity = Gravity.CENTER; setPadding(dp(12), dp(10), dp(12), dp(10)); maxLines = 3; setOnClickListener { seekToLine(line.time) } } }
+        syncedViews = lines.map { line -> text(prefs.fontSize.coerceAtMost(40f).toInt(), 0xff777777.toInt()).apply { this.text = line.text; gravity = Gravity.CENTER; setPadding(dp(12), dp(10), dp(12), dp(10)); maxLines = 3; setOnClickListener { if (!overlayOpen) seekToLine(line.time) } } }
         syncedViews.forEach { syncedLines.addView(it, LinearLayout.LayoutParams(-1, -2)) }
         lastLineIndex = -1
     }
@@ -245,7 +252,9 @@ class MainActivity : Activity() {
     }
     private fun formatTime(milliseconds: Long): String { val seconds = milliseconds.coerceAtLeast(0) / 1000; return "${seconds / 60}:${(seconds % 60).toString().padStart(2, '0')}" }
     private fun adjustOffset(delta: Long) { track?.let { prefs.setOffsetFor(it.id, prefs.offsetFor(it.id) + delta) } ?: run { prefs.globalOffset += delta } }
-    private fun control(path: String) { executor.execute { val result = spotify.control(path, if (path.endsWith("pause") || path.endsWith("play")) "PUT" else "POST", track?.deviceId); handler.post { when (result.code) { 401 -> { setState(State.LOGGED_OUT); showLogin() }; 403 -> setState(State.RATE_LIMITED, "Premium required"); 404 -> setState(State.OFFLINE, "No active device"); in 200..299, 204 -> setState(State.OK); else -> setState(State.OFFLINE) } } } }
+    private fun control(path: String) {
+        if (path.endsWith("/next") || path.endsWith("/previous")) Refront.claim(this)
+        executor.execute { val result = spotify.control(path, if (path.endsWith("pause") || path.endsWith("play")) "PUT" else "POST", track?.deviceId); handler.post { when (result.code) { 401 -> { setState(State.LOGGED_OUT); showLogin() }; 403 -> setState(State.RATE_LIMITED, "Premium required"); 404 -> setState(State.OFFLINE, "No active device"); in 200..299, 204 -> setState(State.OK); else -> setState(State.OFFLINE) } } } }
     private fun toggleSave() { val item = track ?: return; executor.execute { val current = spotify.saved(item.id).value == true; val desired = !current; val result = spotify.save(item.id, desired); if (result.code in 200..299 || result.code == 204) { savedState = desired; handler.post { updateControlIcons() } }; DebugLog.add("library save code=${result.code}") } }
     private fun controlShuffle() { executor.execute { val result = spotify.shuffle(shuffleState, track?.deviceId); if (result.code !in 200..299 && result.code != 204) shuffleState = !shuffleState; DebugLog.add("shuffle code=${result.code}") } }
     private fun controlRepeat() { executor.execute { val result = spotify.repeat(repeatState, track?.deviceId); if (result.code !in 200..299 && result.code != 204) repeatState = if (repeatState == "off") "context" else "off"; DebugLog.add("repeat code=${result.code}") } }

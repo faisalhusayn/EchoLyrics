@@ -12,6 +12,8 @@ import android.widget.*
 class SettingsActivity : Activity() {
     private lateinit var prefs: Prefs
     private lateinit var dmSans: android.graphics.Typeface
+    override fun onResume() { super.onResume(); AppState.resumed++ }
+    override fun onStop() { if (AppState.resumed > 0) AppState.resumed--; super.onStop() }
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
         prefs = Prefs(this)
