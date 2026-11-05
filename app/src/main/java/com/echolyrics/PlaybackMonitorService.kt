@@ -18,7 +18,7 @@ class PlaybackMonitorService : Service() {
                 val track = runCatching { client.current().value }.getOrNull()
                 val isPlaying = track?.playing == true
                 val trackId = track?.id
-                val started = initialized && isPlaying && !wasPlaying
+                val started = isPlaying && (!initialized || !wasPlaying)
                 val changed = initialized && isPlaying && trackId != null && lastTrackId != null && trackId != lastTrackId
                 if (started || changed) Refront.claim(this@PlaybackMonitorService)
                 initialized = true
