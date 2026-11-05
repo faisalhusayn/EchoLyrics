@@ -11,6 +11,7 @@
 - Brightness now follows the system level by default, with an optional manual override slider in Settings; the old "Low brightness" toggle migrates to an 8% manual override.
 - Added an always-visible clock in the top-right corner of the main screen and the Next up panel, in the app font, with a Clock on/off toggle in Settings.
 - The controls button is now an accent-tinted pill, and a matching Next up shortcut sits on the bottom-right.
+- The next track's lyrics and album art are prefetched in the background after a track change, so they appear sooner when the song actually changes.
 - Swipes are ignored when they start on the seek bar, so dragging to seek no longer changes tracks.
 - Switched the bundled font to Figtree SemiBold (600).
 - Added an optional accent-colour background with a subtle vertical gradient and contrast-safe highlight colour.

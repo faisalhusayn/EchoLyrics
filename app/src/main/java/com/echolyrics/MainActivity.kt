@@ -61,7 +61,8 @@ class MainActivity : Activity() {
     private val handler = Handler(Looper.getMainLooper())
     private val executor = Executors.newFixedThreadPool(3)
     private val pollExecutor = Executors.newSingleThreadExecutor()
-    private var track: Track? = null
+    private val prefetchExecutor = Executors.newSingleThreadExecutor()
+    @Volatile private var track: Track? = null
     private var lyric: Lyrics? = null
     private var polledAt = 0L
     private var progress = 0L
@@ -83,6 +84,8 @@ class MainActivity : Activity() {
     private var touchBlocked = false
     private var lastSwipeAt = 0L
     private var rebuildOnResume = false
+    private var prefetchRunnable: Runnable? = null
+    private var lastPrefetchAt = 0L
     private val timeFormat by lazy {
         val format = android.text.format.DateFormat.getTimeFormat(this)
         // Drop the AM/PM marker, keeping the device's 12/24-hour preference.
@@ -135,9 +138,9 @@ class MainActivity : Activity() {
         if (prefs.showClock) handler.post(clockTick)
         handler.removeCallbacks(poller); handler.post(poller)
     }
-    override fun onPause() { super.onPause(); DebugLog.add("activity pause"); handler.removeCallbacks(poller); handler.removeCallbacks(clockTick) }
+    override fun onPause() { super.onPause(); DebugLog.add("activity pause"); handler.removeCallbacks(poller); handler.removeCallbacks(clockTick); prefetchRunnable?.let { handler.removeCallbacks(it) } }
     override fun onStop() { if (AppState.resumed > 0) AppState.resumed--; super.onStop() }
-    override fun onDestroy() { executor.shutdownNow(); pollExecutor.shutdownNow(); handler.removeCallbacksAndMessages(null); lastBitmap?.recycle(); super.onDestroy() }
+    override fun onDestroy() { executor.shutdownNow(); pollExecutor.shutdownNow(); prefetchExecutor.shutdownNow(); handler.removeCallbacksAndMessages(null); lastBitmap?.recycle(); super.onDestroy() }
 
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
         when (event.actionMasked) {
@@ -391,7 +394,7 @@ class MainActivity : Activity() {
         val changed = fresh.id != track?.id; track = fresh; progress = fresh.progress; polledAt = System.currentTimeMillis(); playing = fresh.playing; pollDelay = 2000
         shuffleState = fresh.shuffle; repeatState = fresh.repeat
         handler.post { updateControlIcons() }
-        handler.post { title.text = fresh.title; artist.text = fresh.artist; setState(if (lyric == null && changed) State.LOADING else State.OK); if (changed) { lyric = null; renderSynced(emptyList()); showSynced(); fetchLyrics(fresh, false); fresh.art?.let { loadArt(it) } ?: DebugLog.add("album art URL missing") } }
+        handler.post { title.text = fresh.title; artist.text = fresh.artist; setState(if (lyric == null && changed) State.LOADING else State.OK); if (changed) { lyric = null; renderSynced(emptyList()); showSynced(); fetchLyrics(fresh, false); fresh.art?.let { loadArt(it) } ?: DebugLog.add("album art URL missing"); schedulePrefetch(fresh.id) } }
         if (!changed) return
     }
     private fun fetchLyrics(item: Track, force: Boolean, attempt: Int = 0) { DebugLog.add("lyrics fetch ${item.id.takeLast(6)}"); executor.execute { val lookup = runCatching { lyrics.get(item, force) }; val result = lookup.getOrNull(); val retry = result == null && attempt == 0 && (lookup.isFailure || lyrics.lastNetworkError); if (lookup.isFailure) DebugLog.add("lyrics lookup failed"); DebugLog.add("lyrics result ${item.id.takeLast(6)} synced=${result?.synced?.size ?: 0} plain=${!result?.plain.isNullOrBlank()}"); handler.post { if (track?.id != item.id) { DebugLog.add("discarded stale lyrics"); return@post }; if (retry) { setState(State.LOADING); handler.postDelayed({ if (track?.id == item.id) fetchLyrics(item, true, 1) }, 1500); return@post }; lyric = result; if (!prefs.showLyrics) return@post; if (result == null) { renderSynced(emptyList()); plainText.text = "No lyrics available"; syncedBox.visibility = View.GONE; plainScroll.visibility = View.VISIBLE; setState(if (lyrics.lastNetworkError) State.OFFLINE else State.NO_LYRICS) } else { setState(State.OK); if (result.synced.isEmpty()) { renderSynced(emptyList()); plainText.text = result.plain ?: "No lyrics available"; syncedBox.visibility = View.GONE; plainScroll.visibility = View.VISIBLE } else { renderSynced(result.synced); showSynced() } } } } }
@@ -444,7 +447,71 @@ class MainActivity : Activity() {
     private fun toggleSave() { val item = track ?: return; executor.execute { val current = spotify.saved(item.id).value == true; val desired = !current; val result = spotify.save(item.id, desired); if (result.code in 200..299 || result.code == 204) { savedState = desired; handler.post { updateControlIcons() } }; DebugLog.add("library save code=${result.code}") } }
     private fun controlShuffle() { executor.execute { val result = spotify.shuffle(shuffleState, track?.deviceId); if (result.code !in 200..299 && result.code != 204) shuffleState = !shuffleState; DebugLog.add("shuffle code=${result.code}") } }
     private fun controlRepeat() { executor.execute { val result = spotify.repeat(repeatState, track?.deviceId); if (result.code !in 200..299 && result.code != 204) repeatState = if (repeatState == "off") "context" else "off"; DebugLog.add("repeat code=${result.code}") } }
-    private fun loadArt(url: String) { executor.execute { val result = runCatching { val connection = URL(url).openConnection().apply { connectTimeout = 4000; readTimeout = 4000 }; connection.getInputStream().use { input -> val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }; BitmapFactory.decodeStream(input, null, bounds); val sample = if (bounds.outWidth > 240) 4 else 2; val options = BitmapFactory.Options().apply { inSampleSize = sample }; URL(url).openConnection().apply { connectTimeout = 4000; readTimeout = 4000 }.getInputStream().use { image -> BitmapFactory.decodeStream(image, null, options) } } }; result.onFailure { DebugLog.add("album art load failed") }; val bitmap = result.getOrNull(); if (bitmap == null) DebugLog.add("album art empty"); bitmap?.let { image -> val colors = if (prefs.accentEnabled) Accent.from(image) else null; handler.post { if (track?.art != url) { image.recycle(); return@post }; lastBitmap?.recycle(); lastBitmap = image; thumbnail.setImageBitmap(image); art.setImageBitmap(image); colors?.let { animateAccent(it) } } } } }
+    private fun loadArt(url: String) {
+        executor.execute {
+            val cached = ArtCache.get(url)
+            val bytes = cached ?: runCatching { downloadArtBytes(url) }.getOrNull()
+            if (cached == null && bytes != null) ArtCache.put(url, bytes)
+            val bitmap = bytes?.let { decodeArt(it) }
+            if (bitmap == null) DebugLog.add("album art empty")
+            bitmap?.let { image ->
+                val colors = if (prefs.accentEnabled) Accent.from(image) else null
+                handler.post {
+                    if (track?.art != url) { image.recycle(); return@post }
+                    lastBitmap?.recycle(); lastBitmap = image
+                    thumbnail.setImageBitmap(image); art.setImageBitmap(image)
+                    colors?.let { animateAccent(it) }
+                }
+            }
+        }
+    }
+    private fun downloadArtBytes(url: String): ByteArray {
+        val connection = URL(url).openConnection().apply { connectTimeout = 4000; readTimeout = 4000 }
+        return connection.getInputStream().use { input ->
+            val output = java.io.ByteArrayOutputStream()
+            val buffer = ByteArray(16 * 1024)
+            var total = 0
+            while (true) {
+                val read = input.read(buffer)
+                if (read < 0) break
+                total += read
+                if (total > 2 * 1024 * 1024) break
+                output.write(buffer, 0, read)
+            }
+            output.toByteArray()
+        }
+    }
+    private fun decodeArt(bytes: ByteArray): Bitmap? {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        val sample = if (bounds.outWidth > 240) 4 else 2
+        return BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sample })
+    }
+    /** Shortly after a track change, queue the next track's lyrics and art in the background. */
+    private fun schedulePrefetch(id: String) {
+        prefetchRunnable?.let { handler.removeCallbacks(it) }
+        val runnable = Runnable { startPrefetch(id) }
+        prefetchRunnable = runnable
+        handler.postDelayed(runnable, 2500)
+    }
+    private fun startPrefetch(id: String) {
+        val now = System.currentTimeMillis()
+        // Cooldown keeps rapid skipping from turning into a request burst.
+        if (now - lastPrefetchAt < 20000 || now < AppState.apiBlockedUntil) return
+        if (track?.id != id || !playing || queueVisible) return
+        lastPrefetchAt = now
+        prefetchExecutor.execute {
+            val result = runCatching { spotify.queue() }.getOrNull() ?: return@execute
+            if (result.code !in 200..299 || track?.id != id) return@execute
+            val next = result.value?.firstOrNull() ?: return@execute
+            if (next.id == id) return@execute
+            DebugLog.add("prefetch ${next.id.takeLast(6)}")
+            if (prefs.showLyrics) runCatching { lyrics.get(next, false) }
+            val art = next.art
+            if (art != null && (prefs.showArt || prefs.accentEnabled) && ArtCache.get(art) == null)
+                runCatching { downloadArtBytes(art) }.getOrNull()?.let { ArtCache.put(art, it) }
+        }
+    }
     private fun animateAccent(colors: AccentColors) { val from = accentColor; accentColor = colors.background; accentHighlight = colors.highlight; if (!prefs.accentEnabled) return; accentLayer.visibility = View.VISIBLE; accentAnimator?.cancel(); accentAnimator = ValueAnimator.ofFloat(0f, 1f).apply { duration = 400; addUpdateListener { animation -> val fraction = animation.animatedFraction; accentLayer.background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(blend(from, colors.top, fraction), blend(from, colors.bottom, fraction))) }; start() }; seekBar.progressTintList = ColorStateList.valueOf(accentHighlight); styleFloatingButtons() }
     private fun blend(from: Int, to: Int, fraction: Float): Int { val r = (Color.red(from) + (Color.red(to) - Color.red(from)) * fraction).toInt(); val g = (Color.green(from) + (Color.green(to) - Color.green(from)) * fraction).toInt(); val b = (Color.blue(from) + (Color.blue(to) - Color.blue(from)) * fraction).toInt(); return Color.rgb(r, g, b) }
     private fun scheduleNextPoll() {

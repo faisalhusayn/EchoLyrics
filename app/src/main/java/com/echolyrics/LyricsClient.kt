@@ -54,7 +54,17 @@ class LyricsClient(context: Context) {
         if (!force && file.exists()) runCatching { DebugLog.add("cache disk hit"); return Json.decodeFromString<CachedLyrics>(file.readText()).let { cache(it, track.id) } }
         DebugLog.add("cache miss")
         val result = sources.asSequence().mapNotNull { source -> try { source.find(track) } catch (_: Exception) { lastNetworkError = true; null } }.firstOrNull { it.synced.isNotEmpty() || !it.plain.isNullOrBlank() }
-        result?.let { value -> synchronized(memory) { memory[track.id] = value }; runCatching { file.writeText(Json.encodeToString(CachedLyrics(value.synced.map { CachedLine(it.time, it.text) }, value.plain))) }; cap() }
+        result?.let { value ->
+            synchronized(memory) { memory[track.id] = value }
+            runCatching {
+                // Write to a unique temp file first so a prefetch and a real fetch of the
+                // same track can never interleave into a half-written cache file.
+                val temp = File.createTempFile("lyrics", ".tmp", dir)
+                temp.writeText(Json.encodeToString(CachedLyrics(value.synced.map { CachedLine(it.time, it.text) }, value.plain)))
+                if (!temp.renameTo(file)) { file.delete(); if (!temp.renameTo(file)) temp.delete() }
+            }
+            cap()
+        }
         return result
     }
     fun clear(trackId: String) { synchronized(memory) { memory.remove(trackId) }; File(dir, trackId.replace(Regex("[^A-Za-z0-9._-]"), "_")).delete() }
