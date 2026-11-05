@@ -29,7 +29,7 @@ class SettingsActivity : Activity() {
         root.addView(row(action("Lyrics ${prefs.fontSize.toInt()}sp") { prefs.fontSize = nextFont(prefs.fontSize, lyricSteps); recreate() }, action("Active ${prefs.activeFontSize.toInt()}sp") { prefs.activeFontSize = nextFont(prefs.activeFontSize, activeSteps); recreate() }, action(if (prefs.nightMode) "Night mode on" else "Night mode off") { prefs.nightMode = !prefs.nightMode; recreate() }))
         val brightnessToggle = action(brightnessText()) { if (prefs.brightnessManual) prefs.brightnessManual = false else { prefs.brightnessManual = true; prefs.brightness = systemBrightness() }; recreate() }
         brightnessButton = brightnessToggle
-        root.addView(row(action(if (prefs.accentEnabled) "Accent background on" else "Accent background off") { prefs.accentEnabled = !prefs.accentEnabled; recreate() }, brightnessToggle))
+        root.addView(row(action(if (prefs.accentEnabled) "Accent background on" else "Accent background off") { prefs.accentEnabled = !prefs.accentEnabled; recreate() }, action(if (prefs.showClock) "Clock on" else "Clock off") { prefs.showClock = !prefs.showClock; recreate() }, brightnessToggle))
         root.addView(brightnessRow(), LinearLayout.LayoutParams(-1, dp(60)).apply { setMargins(dp(4), dp(3), dp(4), dp(3)) })
         root.addView(label("SYNC", 12, 0xff999999.toInt()), LinearLayout.LayoutParams(-1, dp(32)))
         root.addView(row(action("Track -100ms") { adjust(-100) }, action("Track +100ms") { adjust(100) }, action("Global -100ms") { prefs.globalOffset -= 100 }, action("Global +100ms") { prefs.globalOffset += 100 }))

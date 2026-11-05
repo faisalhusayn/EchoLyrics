@@ -26,6 +26,8 @@ class MainActivity : Activity() {
     private lateinit var root: FrameLayout
     private lateinit var title: TextView
     private lateinit var artist: TextView
+    private lateinit var clock: TextView
+    private lateinit var queueClock: TextView
     private lateinit var art: ImageView
     private lateinit var accentLayer: View
     private lateinit var thumbnail: ImageView
@@ -79,6 +81,21 @@ class MainActivity : Activity() {
     private var touchBlocked = false
     private var lastSwipeAt = 0L
     private var rebuildOnResume = false
+    private val timeFormat by lazy {
+        val format = android.text.format.DateFormat.getTimeFormat(this)
+        // Drop the AM/PM marker, keeping the device's 12/24-hour preference.
+        if (format is java.text.SimpleDateFormat) {
+            val pattern = format.toPattern().replace("a", "").trim()
+            if (pattern.isNotEmpty()) format.applyPattern(pattern)
+        }
+        format
+    }
+    private val clockTick = object : Runnable {
+        override fun run() {
+            updateClock()
+            handler.postDelayed(this, 60000L - System.currentTimeMillis() % 60000L + 60L)
+        }
+    }
     private val overlayOpen get() = ::overlay.isInitialized && overlay.visibility == View.VISIBLE
     private val queueVisible get() = ::queuePanel.isInitialized && queuePanel.visibility == View.VISIBLE
 
@@ -109,9 +126,13 @@ class MainActivity : Activity() {
         super.onResume(); AppState.resumed++; DebugLog.add("activity resume")
         if (rebuildOnResume && ::root.isInitialized) { rebuildOnResume = false; track = null; lyric = null; buildUi() }
         applyBrightness()
+        if (::clock.isInitialized) clock.visibility = if (prefs.showClock) View.VISIBLE else View.GONE
+        if (::queueClock.isInitialized) queueClock.visibility = if (prefs.showClock) View.VISIBLE else View.GONE
+        handler.removeCallbacks(clockTick)
+        if (prefs.showClock) handler.post(clockTick)
         handler.removeCallbacks(poller); handler.post(poller)
     }
-    override fun onPause() { super.onPause(); DebugLog.add("activity pause"); handler.removeCallbacks(poller) }
+    override fun onPause() { super.onPause(); DebugLog.add("activity pause"); handler.removeCallbacks(poller); handler.removeCallbacks(clockTick) }
     override fun onStop() { if (AppState.resumed > 0) AppState.resumed--; super.onStop() }
     override fun onDestroy() { executor.shutdownNow(); pollExecutor.shutdownNow(); handler.removeCallbacksAndMessages(null); lastBitmap?.recycle(); super.onDestroy() }
 
@@ -156,8 +177,13 @@ class MainActivity : Activity() {
         thumbnail = ImageView(this).apply { scaleType = ImageView.ScaleType.CENTER_CROP; clipToOutline = true; background = GradientDrawable().apply { setColor(0xff202020.toInt()); cornerRadius = dp(14).toFloat() }; visibility = if (prefs.showArt) View.VISIBLE else View.GONE }
         top.addView(thumbnail, LinearLayout.LayoutParams(dp(64), dp(64)))
         val labels = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(12), 0, 0, 0) }
-        title = text(22, Color.WHITE).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END }; artist = text(15, 0xffb8b8b8.toInt()).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END }; labels.addView(title); labels.addView(artist)
-        top.addView(labels, LinearLayout.LayoutParams(0, -1, 1f)); body.addView(top, LinearLayout.LayoutParams(-1, dp(74)))
+        title = text(22, Color.WHITE).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END }
+        clock = text(22, Color.WHITE).apply { gravity = Gravity.END or Gravity.CENTER_VERTICAL; visibility = if (prefs.showClock) View.VISIBLE else View.GONE; setPadding(dp(12), 0, 0, 0) }
+        val titleRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; addView(title, LinearLayout.LayoutParams(0, -2, 1f)); addView(clock, LinearLayout.LayoutParams(-2, -2)) }
+        artist = text(15, 0xffb8b8b8.toInt()).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END }
+        labels.addView(titleRow, LinearLayout.LayoutParams(-1, -2)); labels.addView(artist)
+        top.addView(labels, LinearLayout.LayoutParams(0, -1, 1f))
+        body.addView(top, LinearLayout.LayoutParams(-1, dp(74)))
         syncedLines = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL; setPadding(0, dp(90), 0, dp(90)) }
         syncedScroll = ScrollView(this).apply { isFillViewport = true; addView(syncedLines) }
         syncedBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; addView(syncedScroll, LinearLayout.LayoutParams(-1, -1)) }
@@ -171,6 +197,7 @@ class MainActivity : Activity() {
         root.addView(controlsButton, FrameLayout.LayoutParams(dp(72), dp(56), Gravity.BOTTOM or Gravity.START).apply { setMargins(dp(16), 0, 0, dp(12)) })
         makeQueuePanel()
         root.addView(queuePanel, FrameLayout.LayoutParams(-1, -1))
+        updateClock()
         if (prefs.refreshToken == null && prefs.accessToken == null) showLogin() else setState(State.LOADING)
         setContentView(root)
     }
@@ -231,6 +258,8 @@ class MainActivity : Activity() {
         }
         val header = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
         header.addView(text(24, Color.WHITE).apply { this.text = "Next up" }, LinearLayout.LayoutParams(0, -2, 1f))
+        queueClock = text(15, 0xffb8b8b8.toInt()).apply { gravity = Gravity.END or Gravity.CENTER_VERTICAL; visibility = if (prefs.showClock) View.VISIBLE else View.GONE; setPadding(0, 0, dp(14), 0) }
+        header.addView(queueClock, LinearLayout.LayoutParams(-2, -1))
         header.addView(iconButton(R.drawable.ic_refresh, 48, "Refresh queue") { loadQueue() }, LinearLayout.LayoutParams(dp(48), dp(48)).apply { setMargins(0, 0, dp(10), 0) })
         header.addView(iconButton(R.drawable.ic_close, 48, "Close queue") { hideQueue() }, LinearLayout.LayoutParams(dp(48), dp(48)))
         queuePanel.addView(header, LinearLayout.LayoutParams(-1, dp(58)))
@@ -397,6 +426,11 @@ class MainActivity : Activity() {
     }
     private fun wakePolling() { pollDelay = 2000; handler.removeCallbacks(poller); handler.post(poller) }
     private fun applyBrightness() { val params = window.attributes; params.screenBrightness = if (prefs.brightnessManual) prefs.brightness.coerceIn(.02f, 1f) else -1f; window.attributes = params }
+    private fun updateClock() {
+        val value = timeFormat.format(java.util.Date())
+        if (::clock.isInitialized && clock.text != value) clock.text = value
+        if (::queueClock.isInitialized && queueClock.text != value) queueClock.text = value
+    }
     private fun showLogin() { val web = WebView(this); web.settings.javaScriptEnabled = true; web.settings.domStorageEnabled = true; web.webViewClient = object : WebViewClient() { override fun shouldOverrideUrlLoading(v: WebView, request: WebResourceRequest) = intercept(request.url); @Suppress("DEPRECATION") override fun shouldOverrideUrlLoading(v: WebView, url: String) = intercept(Uri.parse(url)) }; web.loadUrl(spotify.authUrl()); root.removeAllViews(); root.addView(web) }
     private fun intercept(uri: Uri): Boolean { if (uri.scheme == "echolyrics") { uri.getQueryParameter("code")?.let { code -> executor.execute { if (spotify.exchange(code)) handler.post { buildUi() } } }; return true }; return false }
     override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); intent.getStringExtra("refresh_token")?.let { prefs.refreshToken = it; buildUi() }; intent.data?.takeIf { it.scheme == "echolyrics" }?.getQueryParameter("code")?.let { code -> executor.execute { if (spotify.exchange(code)) handler.post { buildUi() } } } }

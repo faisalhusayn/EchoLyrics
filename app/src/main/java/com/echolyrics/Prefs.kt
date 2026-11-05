@@ -53,6 +53,9 @@ class Prefs(context: Context) {
     var showLyrics: Boolean
         get() = p.getBoolean("show_lyrics", true)
         set(value) { p.edit().putBoolean("show_lyrics", value).apply() }
+    var showClock: Boolean
+        get() = p.getBoolean("show_clock", true)
+        set(value) { p.edit().putBoolean("show_clock", value).apply() }
     var accentEnabled: Boolean
         get() = p.getBoolean("accent", false)
         set(value) { p.edit().putBoolean("accent", value).apply() }
