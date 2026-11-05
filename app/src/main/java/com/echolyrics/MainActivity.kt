@@ -108,6 +108,7 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume(); AppState.resumed++; DebugLog.add("activity resume")
         if (rebuildOnResume && ::root.isInitialized) { rebuildOnResume = false; track = null; lyric = null; buildUi() }
+        applyBrightness()
         handler.removeCallbacks(poller); handler.post(poller)
     }
     override fun onPause() { super.onPause(); DebugLog.add("activity pause"); handler.removeCallbacks(poller) }
@@ -395,7 +396,7 @@ class MainActivity : Activity() {
         return pollDelay
     }
     private fun wakePolling() { pollDelay = 2000; handler.removeCallbacks(poller); handler.post(poller) }
-    private fun applyBrightness() { val params = window.attributes; params.screenBrightness = if (prefs.lowBrightness) .08f else -1f; window.attributes = params }
+    private fun applyBrightness() { val params = window.attributes; params.screenBrightness = if (prefs.brightnessManual) prefs.brightness.coerceIn(.02f, 1f) else -1f; window.attributes = params }
     private fun showLogin() { val web = WebView(this); web.settings.javaScriptEnabled = true; web.settings.domStorageEnabled = true; web.webViewClient = object : WebViewClient() { override fun shouldOverrideUrlLoading(v: WebView, request: WebResourceRequest) = intercept(request.url); @Suppress("DEPRECATION") override fun shouldOverrideUrlLoading(v: WebView, url: String) = intercept(Uri.parse(url)) }; web.loadUrl(spotify.authUrl()); root.removeAllViews(); root.addView(web) }
     private fun intercept(uri: Uri): Boolean { if (uri.scheme == "echolyrics") { uri.getQueryParameter("code")?.let { code -> executor.execute { if (spotify.exchange(code)) handler.post { buildUi() } } }; return true }; return false }
     override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); intent.getStringExtra("refresh_token")?.let { prefs.refreshToken = it; buildUi() }; intent.data?.takeIf { it.scheme == "echolyrics" }?.getQueryParameter("code")?.let { code -> executor.execute { if (spotify.exchange(code)) handler.post { buildUi() } } } }

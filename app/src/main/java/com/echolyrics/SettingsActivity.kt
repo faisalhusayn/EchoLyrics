@@ -2,6 +2,7 @@ package com.echolyrics
 
 import android.app.Activity
 import android.content.Intent
+import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
@@ -12,7 +13,8 @@ import android.widget.*
 class SettingsActivity : Activity() {
     private lateinit var prefs: Prefs
     private lateinit var dmSans: android.graphics.Typeface
-    override fun onResume() { super.onResume(); AppState.resumed++ }
+    private var brightnessButton: TextView? = null
+    override fun onResume() { super.onResume(); AppState.resumed++; applyBrightness() }
     override fun onStop() { if (AppState.resumed > 0) AppState.resumed--; super.onStop() }
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
@@ -25,7 +27,10 @@ class SettingsActivity : Activity() {
         root.addView(label("DISPLAY", 12, 0xff999999.toInt()), LinearLayout.LayoutParams(-1, dp(32)))
         root.addView(row(action(if (prefs.showLyrics) "Lyrics visible" else "Lyrics hidden") { prefs.showLyrics = !prefs.showLyrics; recreate() }, action(if (prefs.showArt) "Album art visible" else "Album art hidden") { prefs.showArt = !prefs.showArt; recreate() }))
         root.addView(row(action("Lyrics ${prefs.fontSize.toInt()}sp") { prefs.fontSize = nextFont(prefs.fontSize, lyricSteps); recreate() }, action("Active ${prefs.activeFontSize.toInt()}sp") { prefs.activeFontSize = nextFont(prefs.activeFontSize, activeSteps); recreate() }, action(if (prefs.nightMode) "Night mode on" else "Night mode off") { prefs.nightMode = !prefs.nightMode; recreate() }))
-        root.addView(row(action(if (prefs.accentEnabled) "Accent background on" else "Accent background off") { prefs.accentEnabled = !prefs.accentEnabled; recreate() }, action(if (prefs.lowBrightness) "Low brightness on" else "Low brightness off") { prefs.lowBrightness = !prefs.lowBrightness; recreate() }))
+        val brightnessToggle = action(brightnessText()) { if (prefs.brightnessManual) prefs.brightnessManual = false else { prefs.brightnessManual = true; prefs.brightness = systemBrightness() }; recreate() }
+        brightnessButton = brightnessToggle
+        root.addView(row(action(if (prefs.accentEnabled) "Accent background on" else "Accent background off") { prefs.accentEnabled = !prefs.accentEnabled; recreate() }, brightnessToggle))
+        root.addView(brightnessRow(), LinearLayout.LayoutParams(-1, dp(60)).apply { setMargins(dp(4), dp(3), dp(4), dp(3)) })
         root.addView(label("SYNC", 12, 0xff999999.toInt()), LinearLayout.LayoutParams(-1, dp(32)))
         root.addView(row(action("Track -100ms") { adjust(-100) }, action("Track +100ms") { adjust(100) }, action("Global -100ms") { prefs.globalOffset -= 100 }, action("Global +100ms") { prefs.globalOffset += 100 }))
         root.addView(label("BEHAVIOR", 12, 0xff999999.toInt()), LinearLayout.LayoutParams(-1, dp(32)))
@@ -35,6 +40,44 @@ class SettingsActivity : Activity() {
         setContentView(ScrollView(this).apply { isFillViewport = true; addView(root) })
     }
     private fun adjust(delta: Long) { prefs.globalOffset += delta }
+    private fun brightnessRow(): LinearLayout {
+        val bar = SeekBar(this).apply {
+            max = 100
+            progress = (displayBrightness() * 100).toInt().coerceIn(2, 100)
+            progressTintList = ColorStateList.valueOf(Color.WHITE)
+            thumbTintList = ColorStateList.valueOf(Color.WHITE)
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onStartTrackingTouch(bar: SeekBar) {}
+                override fun onStopTrackingTouch(bar: SeekBar) {}
+                override fun onProgressChanged(bar: SeekBar, value: Int, fromUser: Boolean) {
+                    if (!fromUser) return
+                    prefs.brightnessManual = true
+                    prefs.brightness = value.coerceAtLeast(2) / 100f
+                    applyBrightness()
+                    brightnessButton?.text = brightnessText()
+                }
+            })
+        }
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(18), 0, dp(10), 0)
+            background = GradientDrawable().apply { setColor(0xff242424.toInt()); cornerRadius = dp(18).toFloat(); setStroke(dp(1), 0xff3c3c3c.toInt()) }
+            addView(label("Brightness", 13, 0xffcccccc.toInt()), LinearLayout.LayoutParams(0, dp(56), .32f))
+            addView(bar, LinearLayout.LayoutParams(0, dp(56), .68f))
+        }
+    }
+    private fun displayBrightness() = if (prefs.brightnessManual) prefs.brightness else systemBrightness()
+    private fun brightnessText() = "Brightness: " + if (prefs.brightnessManual) "${(prefs.brightness * 100).toInt()}%" else "System"
+    private fun systemBrightness(): Float {
+        val value = android.provider.Settings.System.getInt(contentResolver, android.provider.Settings.System.SCREEN_BRIGHTNESS, 128)
+        return (value / 255f).coerceIn(.05f, 1f)
+    }
+    private fun applyBrightness() {
+        val params = window.attributes
+        params.screenBrightness = if (prefs.brightnessManual) prefs.brightness.coerceIn(.02f, 1f) else -1f
+        window.attributes = params
+    }
     private val lyricSteps = listOf(20f, 24f, 28f, 34f, 40f, 48f)
     private val activeSteps = listOf(28f, 34f, 40f, 48f)
     private fun nextFont(current: Float, steps: List<Float>) = steps.firstOrNull { it > current + .5f } ?: steps.first()

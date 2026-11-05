@@ -34,6 +34,19 @@ class Prefs(context: Context) {
     var autoLaunch: Boolean
         get() = p.getBoolean("auto_launch", false)
         set(value) { p.edit().putBoolean("auto_launch", value).apply() }
+    /** When true, EchoLyrics uses [brightness] instead of following the system level. */
+    var brightnessManual: Boolean
+        get() = p.getBoolean("bright_manual", false)
+        set(value) { p.edit().putBoolean("bright_manual", value).apply() }
+    /** Manual window brightness, 0.02..1.0. */
+    var brightness: Float
+        get() = p.getFloat("bright", .5f)
+        set(value) { p.edit().putFloat("bright", value.coerceIn(.02f, 1f)).apply() }
+    init {
+        // Anyone who had the old "Low brightness" toggle keeps that level as a manual override.
+        if (!p.contains("bright_manual") && p.getBoolean("low_brightness", false))
+            p.edit().putBoolean("bright_manual", true).putFloat("bright", .08f).apply()
+    }
     var showArt: Boolean
         get() = p.getBoolean("show_art", true)
         set(value) { p.edit().putBoolean("show_art", value).apply() }
@@ -43,9 +56,6 @@ class Prefs(context: Context) {
     var accentEnabled: Boolean
         get() = p.getBoolean("accent", false)
         set(value) { p.edit().putBoolean("accent", value).apply() }
-    var lowBrightness: Boolean
-        get() = p.getBoolean("low_brightness", false)
-        set(value) { p.edit().putBoolean("low_brightness", value).apply() }
     var grantedScope: String
         get() = p.getString("scope", "") ?: ""
         set(value) { p.edit().putString("scope", value).apply() }

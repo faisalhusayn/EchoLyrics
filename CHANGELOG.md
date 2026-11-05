@@ -8,6 +8,7 @@
 - Split the font size setting into two: Lyrics size for the other lines and Active size for the highlighted line.
 - Added a read-only "Next up" panel showing the upcoming Spotify queue. It is fetched only when opened or refreshed, so playback polling and request volume are unchanged.
 - The playback monitor now restarts after a reboot or app update (when Auto-launch is on), and it launches EchoLyrics if music is already playing when the monitor starts.
+- Brightness now follows the system level by default, with an optional manual override slider in Settings; the old "Low brightness" toggle migrates to an 8% manual override.
 - Swipes are ignored when they start on the seek bar, so dragging to seek no longer changes tracks.
 - Switched the bundled font to Figtree SemiBold (600).
 - Added an optional accent-colour background with a subtle vertical gradient and contrast-safe highlight colour.
