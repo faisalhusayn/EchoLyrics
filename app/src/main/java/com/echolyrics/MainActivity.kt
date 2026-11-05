@@ -16,6 +16,7 @@ import android.view.*
 import android.webkit.*
 import android.widget.*
 import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.RippleDrawable
 import java.net.URL
 import java.util.concurrent.Executors
 
@@ -46,6 +47,7 @@ class MainActivity : Activity() {
     private lateinit var elapsedTime: TextView
     private lateinit var totalTime: TextView
     private lateinit var controlsButton: ImageButton
+    private lateinit var queueButton: ImageButton
     private lateinit var playButton: ImageButton
     private lateinit var previousButton: ImageButton
     private lateinit var nextButton: ImageButton
@@ -126,6 +128,7 @@ class MainActivity : Activity() {
         super.onResume(); AppState.resumed++; DebugLog.add("activity resume")
         if (rebuildOnResume && ::root.isInitialized) { rebuildOnResume = false; track = null; lyric = null; buildUi() }
         applyBrightness()
+        styleFloatingButtons()
         if (::clock.isInitialized) clock.visibility = if (prefs.showClock) View.VISIBLE else View.GONE
         if (::queueClock.isInitialized) queueClock.visibility = if (prefs.showClock) View.VISIBLE else View.GONE
         handler.removeCallbacks(clockTick)
@@ -194,7 +197,10 @@ class MainActivity : Activity() {
         plainScroll.visibility = View.GONE
         makeOverlay()
         controlsButton = iconButton(R.drawable.ic_lyrics, 56, "Open controls") { toggleOverlay() }
-        root.addView(controlsButton, FrameLayout.LayoutParams(dp(72), dp(56), Gravity.BOTTOM or Gravity.START).apply { setMargins(dp(16), 0, 0, dp(12)) })
+        root.addView(controlsButton, FrameLayout.LayoutParams(dp(64), dp(56), Gravity.BOTTOM or Gravity.START).apply { setMargins(dp(16), 0, 0, dp(12)) })
+        queueButton = iconButton(R.drawable.ic_queue, 56, "Next up") { if (queueVisible) hideQueue() else showQueue() }
+        root.addView(queueButton, FrameLayout.LayoutParams(dp(64), dp(56), Gravity.BOTTOM or Gravity.END).apply { setMargins(0, 0, dp(16), dp(12)) })
+        styleFloatingButtons()
         makeQueuePanel()
         root.addView(queuePanel, FrameLayout.LayoutParams(-1, -1))
         updateClock()
@@ -241,7 +247,45 @@ class MainActivity : Activity() {
             else -> R.drawable.ic_lyrics to "Open controls"
         }
         controlsButton.setImageResource(icon); controlsButton.contentDescription = description
+        // While a panel is open it supplies its own close action, so hide the other floating button.
+        controlsButton.visibility = if (queueVisible) View.GONE else View.VISIBLE
+        if (::queueButton.isInitialized) {
+            queueButton.setImageResource(if (queueVisible) R.drawable.ic_close else R.drawable.ic_queue)
+            queueButton.contentDescription = if (queueVisible) "Close queue" else "Next up"
+            queueButton.visibility = if (overlayOpen) View.GONE else View.VISIBLE
+        }
+        styleFloatingButtons()
     }
+    /** Accent-tinted pills for the floating buttons; plain dark pills while a panel is open. */
+    private fun styleFloatingButtons() {
+        val accent = prefs.accentEnabled && !overlayOpen && !queueVisible
+        if (::controlsButton.isInitialized) stylePill(controlsButton, accent)
+        if (::queueButton.isInitialized) stylePill(queueButton, accent)
+    }
+    private fun stylePill(button: ImageButton, accent: Boolean) {
+        val base = if (accent) accentHighlight else 0xff272a2a.toInt()
+        val fill = withAlpha(base, if (accent) 0x3a else 0xff)
+        val upper = withAlpha(blend(base, Color.WHITE, .10f), if (accent) 0x3a else 0xff)
+        val edge = withAlpha(if (accent) accentHighlight else 0xff454949.toInt(), if (accent) 0xb0 else 0xff)
+        val body = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(upper, fill)).apply {
+            cornerRadius = dp(28).toFloat()
+            setStroke(dp(1), edge)
+        }
+        val mask = GradientDrawable().apply { setColor(Color.WHITE); cornerRadius = dp(28).toFloat() }
+        button.background = RippleDrawable(
+            ColorStateList.valueOf(withAlpha(if (accent) accentHighlight else 0xff999999.toInt(), 0x55)), body, mask
+        )
+        button.imageTintList = ColorStateList.valueOf(if (accent) accentHighlight else Color.WHITE)
+        button.elevation = dp(4).toFloat()
+        // Clip the press ripple and shadow to the pill instead of the view's rectangle.
+        button.outlineProvider = object : android.view.ViewOutlineProvider() {
+            override fun getOutline(view: View, outline: android.graphics.Outline) {
+                outline.setRoundRect(0, 0, view.width, view.height, dp(28).toFloat())
+            }
+        }
+        button.clipToOutline = true
+    }
+    private fun withAlpha(color: Int, alpha: Int) = Color.argb(alpha, Color.red(color), Color.green(color), Color.blue(color))
 
     // Read-only "Next up" view. Spotify has no API for jumping to, reordering,
     // or removing queued items, so rows are deliberately not clickable. The
@@ -270,6 +314,7 @@ class MainActivity : Activity() {
     }
     private fun showQueue() {
         if (!::queuePanel.isInitialized) return
+        if (queueVisible) { hideQueue(); return }
         overlay.visibility = View.GONE
         queuePanel.visibility = View.VISIBLE
         updateControlsButton()
@@ -400,7 +445,7 @@ class MainActivity : Activity() {
     private fun controlShuffle() { executor.execute { val result = spotify.shuffle(shuffleState, track?.deviceId); if (result.code !in 200..299 && result.code != 204) shuffleState = !shuffleState; DebugLog.add("shuffle code=${result.code}") } }
     private fun controlRepeat() { executor.execute { val result = spotify.repeat(repeatState, track?.deviceId); if (result.code !in 200..299 && result.code != 204) repeatState = if (repeatState == "off") "context" else "off"; DebugLog.add("repeat code=${result.code}") } }
     private fun loadArt(url: String) { executor.execute { val result = runCatching { val connection = URL(url).openConnection().apply { connectTimeout = 4000; readTimeout = 4000 }; connection.getInputStream().use { input -> val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }; BitmapFactory.decodeStream(input, null, bounds); val sample = if (bounds.outWidth > 240) 4 else 2; val options = BitmapFactory.Options().apply { inSampleSize = sample }; URL(url).openConnection().apply { connectTimeout = 4000; readTimeout = 4000 }.getInputStream().use { image -> BitmapFactory.decodeStream(image, null, options) } } }; result.onFailure { DebugLog.add("album art load failed") }; val bitmap = result.getOrNull(); if (bitmap == null) DebugLog.add("album art empty"); bitmap?.let { image -> val colors = if (prefs.accentEnabled) Accent.from(image) else null; handler.post { if (track?.art != url) { image.recycle(); return@post }; lastBitmap?.recycle(); lastBitmap = image; thumbnail.setImageBitmap(image); art.setImageBitmap(image); colors?.let { animateAccent(it) } } } } }
-    private fun animateAccent(colors: AccentColors) { val from = accentColor; accentColor = colors.background; accentHighlight = colors.highlight; if (!prefs.accentEnabled) return; accentLayer.visibility = View.VISIBLE; accentAnimator?.cancel(); accentAnimator = ValueAnimator.ofFloat(0f, 1f).apply { duration = 400; addUpdateListener { animation -> val fraction = animation.animatedFraction; accentLayer.background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(blend(from, colors.top, fraction), blend(from, colors.bottom, fraction))) }; start() }; seekBar.progressTintList = ColorStateList.valueOf(accentHighlight) }
+    private fun animateAccent(colors: AccentColors) { val from = accentColor; accentColor = colors.background; accentHighlight = colors.highlight; if (!prefs.accentEnabled) return; accentLayer.visibility = View.VISIBLE; accentAnimator?.cancel(); accentAnimator = ValueAnimator.ofFloat(0f, 1f).apply { duration = 400; addUpdateListener { animation -> val fraction = animation.animatedFraction; accentLayer.background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(blend(from, colors.top, fraction), blend(from, colors.bottom, fraction))) }; start() }; seekBar.progressTintList = ColorStateList.valueOf(accentHighlight); styleFloatingButtons() }
     private fun blend(from: Int, to: Int, fraction: Float): Int { val r = (Color.red(from) + (Color.red(to) - Color.red(from)) * fraction).toInt(); val g = (Color.green(from) + (Color.green(to) - Color.green(from)) * fraction).toInt(); val b = (Color.blue(from) + (Color.blue(to) - Color.blue(from)) * fraction).toInt(); return Color.rgb(r, g, b) }
     private fun scheduleNextPoll() {
         handler.removeCallbacks(poller)
