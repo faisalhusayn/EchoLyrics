@@ -12,6 +12,7 @@
 - Added an always-visible clock in the top-right corner of the main screen and the Next up panel, in the app font, with a Clock on/off toggle in Settings.
 - The controls button is now an accent-tinted pill, and a matching Next up shortcut sits on the bottom-right.
 - The next track's lyrics and album art are prefetched in the background after a track change, so they appear sooner when the song actually changes.
+- Synced lyrics now slide smoothly between lines instead of jumping, and every line keeps a fixed slot so the active line growing or shrinking no longer reflows the list; the separate Lyrics and Active size settings still control both sizes.
 - Swipes are ignored when they start on the seek bar, so dragging to seek no longer changes tracks.
 - Switched the bundled font to Figtree SemiBold (600).
 - Added an optional accent-colour background with a subtle vertical gradient and contrast-safe highlight colour.

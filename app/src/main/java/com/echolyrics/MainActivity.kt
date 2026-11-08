@@ -400,8 +400,28 @@ class MainActivity : Activity() {
     private fun fetchLyrics(item: Track, force: Boolean, attempt: Int = 0) { DebugLog.add("lyrics fetch ${item.id.takeLast(6)}"); executor.execute { val lookup = runCatching { lyrics.get(item, force) }; val result = lookup.getOrNull(); val retry = result == null && attempt == 0 && (lookup.isFailure || lyrics.lastNetworkError); if (lookup.isFailure) DebugLog.add("lyrics lookup failed"); DebugLog.add("lyrics result ${item.id.takeLast(6)} synced=${result?.synced?.size ?: 0} plain=${!result?.plain.isNullOrBlank()}"); handler.post { if (track?.id != item.id) { DebugLog.add("discarded stale lyrics"); return@post }; if (retry) { setState(State.LOADING); handler.postDelayed({ if (track?.id == item.id) fetchLyrics(item, true, 1) }, 1500); return@post }; lyric = result; if (!prefs.showLyrics) return@post; if (result == null) { renderSynced(emptyList()); plainText.text = "No lyrics available"; syncedBox.visibility = View.GONE; plainScroll.visibility = View.VISIBLE; setState(if (lyrics.lastNetworkError) State.OFFLINE else State.NO_LYRICS) } else { setState(State.OK); if (result.synced.isEmpty()) { renderSynced(emptyList()); plainText.text = result.plain ?: "No lyrics available"; syncedBox.visibility = View.GONE; plainScroll.visibility = View.VISIBLE } else { renderSynced(result.synced); showSynced() } } } } }
     private fun renderSynced(lines: List<LyricLine>) {
         syncedLines.removeAllViews()
-        syncedViews = lines.map { line -> text(prefs.fontSize.coerceAtMost(48f).toInt(), 0xff777777.toInt()).apply { this.text = line.text; gravity = Gravity.CENTER; setPadding(dp(12), dp(10), dp(12), dp(10)); maxLines = 3; setOnClickListener { if (!overlayOpen && !queueVisible) seekToLine(line.time) } } }
-        syncedViews.forEach { syncedLines.addView(it, LinearLayout.LayoutParams(-2, -2)) }
+        val active = prefs.activeFontSize
+        val normal = prefs.fontSize
+        val available = syncedScroll.width.takeIf { it > 0 } ?: resources.displayMetrics.widthPixels
+        // Each line gets a fixed slot tall enough for both its active and inactive rendering, so
+        // changing size can never reflow the list or move the lines below it.
+        syncedViews = lines.map { line ->
+            val view = text(normal.toInt(), Color.WHITE).apply {
+                this.text = line.text; gravity = Gravity.CENTER; setPadding(dp(12), dp(10), dp(12), dp(10)); maxLines = 3; alpha = .5f
+                setOnClickListener { if (!overlayOpen && !queueVisible) seekToLine(line.time) }
+            }
+            val widthSpec = View.MeasureSpec.makeMeasureSpec(available, View.MeasureSpec.AT_MOST)
+            val heightSpec = View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+            view.textSize = normal
+            view.measure(widthSpec, heightSpec)
+            val normalHeight = view.measuredHeight
+            view.textSize = active
+            view.measure(widthSpec, heightSpec)
+            view.textSize = normal
+            view.layoutParams = LinearLayout.LayoutParams(-2, maxOf(normalHeight, view.measuredHeight))
+            view
+        }
+        syncedViews.forEach { syncedLines.addView(it) }
         lastLineIndex = -1
     }
     private fun seekToLine(time: Long) {
@@ -422,7 +442,31 @@ class MainActivity : Activity() {
     private fun showSynced() { syncedBox.visibility = View.VISIBLE; plainScroll.visibility = View.GONE }
     private fun drawLyrics() {
         val item = track ?: return; if (!prefs.showLyrics) return; val value = progress + if (playing) System.currentTimeMillis() - polledAt else 0; val offset = prefs.offsetFor(item.id) + prefs.globalOffset; val lines = lyric?.synced.orEmpty()
-        if (lines.isNotEmpty() && syncedViews.size == lines.size) { val index = lines.indexOfLast { it.time <= value + offset }.coerceAtLeast(0); if (index != lastLineIndex) { if (lastLineIndex == -1) DebugLog.add("font active=${prefs.activeFontSize.toInt()} other=${prefs.fontSize.toInt()}"); lastLineIndex = index; syncedViews.forEachIndexed { n, view -> view.setTextColor(if (n == index) Color.WHITE else 0xff777777.toInt()); view.textSize = if (n == index) prefs.activeFontSize else prefs.fontSize }; syncedScroll.post { val view = syncedViews[index]; syncedScroll.scrollTo(0, (view.top - syncedScroll.height / 2 + view.height / 2).coerceAtLeast(0)) } } }
+        if (lines.isNotEmpty() && syncedViews.size == lines.size) {
+            var index = lines.indexOfLast { it.time <= value + offset }.coerceAtLeast(0)
+            // A sub-second backward correction from a fresh poll should not make the highlight
+            // flicker back for one tick; only step back on a real jump or seek.
+            if (playing && index < lastLineIndex && value + offset > lines[lastLineIndex].time - 800) index = lastLineIndex
+            if (index != lastLineIndex) {
+                if (lastLineIndex == -1) DebugLog.add("font active=${prefs.activeFontSize.toInt()} other=${prefs.fontSize.toInt()}")
+                val previous = lastLineIndex
+                lastLineIndex = index
+                // Size changes stay inside each line's fixed slot, so the list never reflows and
+                // long lines are never clipped.
+                fun highlight(view: TextView, active: Boolean) {
+                    view.animate().cancel()
+                    view.animate().alpha(if (active) 1f else .5f).setDuration(200).start()
+                    view.textSize = if (active) prefs.activeFontSize else prefs.fontSize
+                }
+                syncedViews.getOrNull(previous)?.let { highlight(it, false) }
+                highlight(syncedViews[index], true)
+                val view = syncedViews[index]
+                syncedScroll.post {
+                    val target = (view.top + view.height / 2 - syncedScroll.height / 2).coerceAtLeast(0)
+                    if (previous == -1) syncedScroll.scrollTo(0, target) else syncedScroll.smoothScrollTo(0, target)
+                }
+            }
+        }
         lyric?.plain?.takeIf { lines.isEmpty() }?.let { if (System.currentTimeMillis() > plainManualUntil && !plainAuto) plainAuto = true; if (plainAuto && System.currentTimeMillis() > plainManualUntil) { val ratio = (value.toFloat() / item.duration.coerceAtLeast(1)).coerceIn(0f, 1f); plainScroll.post { val max = (plainText.height - plainScroll.height).coerceAtLeast(0); plainScroll.scrollTo(0, (max * ratio).toInt()) } } }
         if (::elapsedTime.isInitialized) { elapsedTime.text = formatTime(value); totalTime.text = formatTime(item.duration.toLong()) }
         if (!seeking && ::seekBar.isInitialized && item.duration > 0) seekBar.progress = (value.coerceIn(0, item.duration.toLong()) * 1000 / item.duration).toInt()
